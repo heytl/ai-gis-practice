@@ -41,6 +41,9 @@
       </el-card>
     </div>
 
+    <!-- 缓冲区分析弹窗 -->
+    <buffer-analysis ref="bufferAnalysisRef" @buffer-complete="handleBufferComplete" />
+
     <!-- 统一的上下文菜单 -->
     <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle">
       <div class="context-menu-item" @click="handleContextMenuCommand('zoom')">
@@ -55,13 +58,18 @@
         <el-icon><Delete /></el-icon>
         <span>删除图层</span>
       </div>
+      <div class="context-menu-item" @click="handleContextMenuCommand('buffer')">
+        <el-icon><Opportunity /></el-icon>
+        <span>缓冲区分析</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Plus, Download, Delete, MoreFilled, ZoomIn } from '@element-plus/icons-vue'
+import { Plus, Download, Delete, MoreFilled, ZoomIn, Opportunity } from '@element-plus/icons-vue'
+import BufferAnalysis from './BufferAnalysis.vue'
 import { ElMessage } from 'element-plus'
 import { saveAs } from 'file-saver'
 
@@ -77,7 +85,16 @@ export interface LayerInfo {
 const layers = ref<LayerInfo[]>([])
 
 // 定义事件
-const emit = defineEmits(['add-layer', 'remove-layer', 'toggle-layer', 'zoom-to-layer'])
+const emit = defineEmits([
+  'add-layer',
+  'remove-layer',
+  'toggle-layer',
+  'zoom-to-layer',
+  'buffer-complete',
+])
+
+const currentLayer = ref<LayerInfo>()
+const bufferAnalysisRef = ref(null)
 
 // 处理文件上传
 const handleFileChange = (file: any) => {
@@ -85,32 +102,36 @@ const handleFileChange = (file: any) => {
   reader.onload = (e) => {
     try {
       const geoJson = JSON.parse(e.target?.result as string)
-
-      // 生成唯一ID
-      const layerId = 'layer_' + Date.now()
-
-      // 创建图层对象
-      const layerInfo: LayerInfo = {
-        id: layerId,
-        name: file.name.replace(/\.(geojson|json)$/i, ''),
-        visible: true,
-        data: geoJson,
-        olLayer: null, // 这个会在父组件中设置
-      }
-
-      // 添加到图层列表
-      layers.value.push(layerInfo)
-
-      // 通知父组件添加图层
-      emit('add-layer', layerInfo)
-
-      ElMessage.success(`成功导入图层: ${layerInfo.name}`)
+      addGeoJsonLayer(file.name.replace(/\.(geojson|json)$/i, ''), geoJson)
     } catch (error) {
       ElMessage.error('GeoJSON文件解析失败')
       console.error(error)
     }
   }
   reader.readAsText(file.raw)
+}
+
+// 添加GeoJSON图层
+const addGeoJsonLayer = (name: string, geoJson: any) => {
+  // 生成唯一ID
+  const layerId = 'layer_' + Date.now()
+
+  // 创建图层对象
+  const layerInfo: LayerInfo = {
+    id: layerId,
+    name: name,
+    visible: true,
+    data: geoJson,
+    olLayer: null,
+  }
+
+  // 添加到图层列表
+  layers.value.push(layerInfo)
+
+  // 通知父组件添加图层
+  emit('add-layer', layerInfo)
+
+  ElMessage.success(`成功导入图层: ${layerInfo.name}`)
 }
 
 // 切换图层可见性
@@ -179,17 +200,28 @@ const showContextMenu = (
 // 处理上下文菜单命令
 const handleContextMenuCommand = (command: string) => {
   if (activeLayer.value) {
+    currentLayer.value = activeLayer.value.layer
+
     if (command === 'export') {
       exportLayer(activeLayer.value.layer)
     } else if (command === 'remove') {
       removeLayer(activeLayer.value.index)
     } else if (command === 'zoom') {
       zoomToLayer(activeLayer.value.layer)
+    } else if (command === 'buffer') {
+      // 触发缓冲区分析弹窗
+      bufferAnalysisRef.value?.open(activeLayer.value.layer)
     }
 
     // 隐藏菜单
     contextMenuVisible.value = false
   }
+}
+
+// 处理缓冲区分析完成事件
+const handleBufferComplete = (bufferedLayer: LayerInfo) => {
+  addGeoJsonLayer(bufferedLayer.name, bufferedLayer.data)
+  emit('buffer-complete', bufferedLayer)
 }
 
 // 缩放至图层
