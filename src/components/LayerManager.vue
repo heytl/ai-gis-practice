@@ -1,0 +1,296 @@
+<template>
+  <div class="layer-manager">
+    <div class="layer-header">
+      <h3>图层管理</h3>
+      <el-upload
+        class="upload-btn"
+        action=""
+        :auto-upload="false"
+        :show-file-list="false"
+        accept=".geojson,.json"
+        :on-change="handleFileChange"
+      >
+        <el-button type="primary" :icon="Plus">导入GeoJSON</el-button>
+      </el-upload>
+    </div>
+
+    <div class="layer-list">
+      <el-empty v-if="layers.length === 0" description="暂无图层" />
+      <el-card
+        v-for="(layer, index) in layers"
+        :key="index"
+        class="layer-item"
+        @contextmenu.prevent="showContextMenu($event, layer, index)"
+      >
+        <div class="layer-item-content">
+          <div class="layer-info">
+            <el-switch v-model="layer.visible" @change="toggleLayerVisibility(layer)" />
+            <span class="layer-name">{{ layer.name }}</span>
+          </div>
+          <div class="layer-actions">
+            <el-button
+              type="info"
+              :icon="MoreFilled"
+              circle
+              size="small"
+              title="更多操作"
+              @click="showContextMenu($event, layer, index, true)"
+            ></el-button>
+          </div>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- 统一的上下文菜单 -->
+    <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle">
+      <div class="context-menu-item" @click="handleContextMenuCommand('zoom')">
+        <el-icon><ZoomIn /></el-icon>
+        <span>缩放至图层</span>
+      </div>
+      <div class="context-menu-item" @click="handleContextMenuCommand('export')">
+        <el-icon><Download /></el-icon>
+        <span>导出图层</span>
+      </div>
+      <div class="context-menu-item" @click="handleContextMenuCommand('remove')">
+        <el-icon><Delete /></el-icon>
+        <span>删除图层</span>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
+import { Plus, Download, Delete, MoreFilled, ZoomIn } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { saveAs } from 'file-saver'
+
+// 定义图层类型
+export interface LayerInfo {
+  id: string
+  name: string
+  visible: boolean
+  data: any
+  olLayer: any
+}
+
+const layers = ref<LayerInfo[]>([])
+
+// 定义事件
+const emit = defineEmits(['add-layer', 'remove-layer', 'toggle-layer', 'zoom-to-layer'])
+
+// 处理文件上传
+const handleFileChange = (file: any) => {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const geoJson = JSON.parse(e.target?.result as string)
+
+      // 生成唯一ID
+      const layerId = 'layer_' + Date.now()
+
+      // 创建图层对象
+      const layerInfo: LayerInfo = {
+        id: layerId,
+        name: file.name.replace(/\.(geojson|json)$/i, ''),
+        visible: true,
+        data: geoJson,
+        olLayer: null, // 这个会在父组件中设置
+      }
+
+      // 添加到图层列表
+      layers.value.push(layerInfo)
+
+      // 通知父组件添加图层
+      emit('add-layer', layerInfo)
+
+      ElMessage.success(`成功导入图层: ${layerInfo.name}`)
+    } catch (error) {
+      ElMessage.error('GeoJSON文件解析失败')
+      console.error(error)
+    }
+  }
+  reader.readAsText(file.raw)
+}
+
+// 切换图层可见性
+const toggleLayerVisibility = (layer: LayerInfo) => {
+  emit('toggle-layer', layer)
+}
+
+// 导出图层
+const exportLayer = (layer: LayerInfo) => {
+  const blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
+  saveAs(blob, `${layer.name}.geojson`)
+  ElMessage.success(`成功导出图层: ${layer.name}`)
+}
+
+// 删除图层
+const removeLayer = (index: number) => {
+  const layer = layers.value[index]
+  layers.value.splice(index, 1)
+  emit('remove-layer', layer)
+  ElMessage.success(`成功删除图层: ${layer.name}`)
+}
+
+// 由于已统一使用上下文菜单，不再需要单独的下拉菜单处理函数
+
+// 统一的上下文菜单相关
+const contextMenuVisible = ref(false)
+const contextMenuStyle = ref({
+  top: '0px',
+  left: '0px',
+})
+const activeLayer = ref<{ layer: LayerInfo; index: number } | null>(null)
+
+// 显示上下文菜单（同时处理右键和按钮点击）
+const showContextMenu = (
+  event: MouseEvent,
+  layer: LayerInfo,
+  index: number,
+  isButtonClick: boolean = false,
+) => {
+  // 阻止事件冒泡
+  event.stopPropagation()
+
+  // 根据触发方式设置菜单位置
+  if (isButtonClick) {
+    // 如果是按钮点击，菜单显示在按钮下方
+    const buttonRect = (event.target as HTMLElement).getBoundingClientRect()
+    contextMenuStyle.value = {
+      top: `${buttonRect.bottom}px`,
+      left: `${buttonRect.left}px`,
+    }
+  } else {
+    // 如果是右键点击，菜单显示在鼠标位置
+    contextMenuStyle.value = {
+      top: `${event.clientY}px`,
+      left: `${event.clientX}px`,
+    }
+  }
+
+  // 保存当前操作的图层
+  activeLayer.value = { layer, index }
+
+  // 显示菜单
+  contextMenuVisible.value = true
+}
+
+// 处理上下文菜单命令
+const handleContextMenuCommand = (command: string) => {
+  if (activeLayer.value) {
+    if (command === 'export') {
+      exportLayer(activeLayer.value.layer)
+    } else if (command === 'remove') {
+      removeLayer(activeLayer.value.index)
+    } else if (command === 'zoom') {
+      zoomToLayer(activeLayer.value.layer)
+    }
+
+    // 隐藏菜单
+    contextMenuVisible.value = false
+  }
+}
+
+// 缩放至图层
+const zoomToLayer = (layer: LayerInfo) => {
+  emit('zoom-to-layer', layer)
+  ElMessage.success(`已缩放至图层: ${layer.name}`)
+}
+
+// 点击其他地方关闭上下文菜单
+const handleClickOutside = (event: MouseEvent) => {
+  // 确保点击事件不是来自菜单按钮
+  contextMenuVisible.value = false
+}
+
+// 挂载和卸载全局点击事件
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
+</script>
+
+<style scoped>
+.layer-manager {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.layer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.layer-header h3 {
+  margin: 0;
+}
+
+.layer-list {
+  flex: 1;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.layer-item {
+  margin-bottom: 10px;
+  width: 100%;
+}
+
+.layer-item-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.layer-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.layer-name {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.layer-actions {
+  display: flex;
+  gap: 5px;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  background: white;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  z-index: 9999;
+  min-width: 120px;
+}
+
+.context-menu-item {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.context-menu-item:hover {
+  background-color: #f5f7fa;
+}
+</style>
