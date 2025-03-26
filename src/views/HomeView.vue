@@ -2,6 +2,11 @@
   <div class="home-container">
     <div class="map-container">
       <MapView ref="mapViewRef" @map-ready="onMapReady" />
+      <DrawToolbar
+        :visible="currentEditingLayer !== null"
+        @tool-change="onDrawToolChange"
+        @stop-drawing="stopDrawing"
+      />
     </div>
     <div class="layer-manager-container">
       <LayerManager
@@ -9,6 +14,7 @@
         @remove-layer="removeLayer"
         @toggle-layer="toggleLayerVisibility"
         @zoom-to-layer="zoomToLayer"
+        @edit-layer="onEditLayer"
       />
     </div>
   </div>
@@ -18,18 +24,66 @@
 import { ref } from 'vue'
 import MapView from '@/components/MapView.vue'
 import LayerManager from '@/components/LayerManager.vue'
+import DrawToolbar from '@/components/DrawToolbar.vue'
 import { Map } from 'ol'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
 import GeoJSON from 'ol/format/GeoJSON'
 import { ElMessage } from 'element-plus'
+import Draw from 'ol/interaction/Draw'
+import { Feature } from 'ol'
+import { Geometry } from 'ol/geom'
 
 const mapViewRef = ref<any>(null)
 const olMap = ref<Map | null>(null)
+const currentEditingLayer = ref<LayerInfo | null>(null)
+const currentDraw = ref<Draw | null>(null)
 
 // 地图准备好后的回调
 const onMapReady = (map: Map) => {
   olMap.value = map
+}
+
+// 处理图层编辑状态变更
+const onEditLayer = (layer: LayerInfo) => {
+  if (layer.isEditing) {
+    currentEditingLayer.value = layer
+  } else {
+    stopDrawing()
+    currentEditingLayer.value = null
+  }
+}
+
+// 处理绘制工具变更
+const onDrawToolChange = (geometryType: string) => {
+  if (!olMap.value || !currentEditingLayer.value?.olLayer) return
+
+  // 移除现有的绘制交互
+  stopDrawing()
+
+  // 创建新的绘制交互
+  const draw = new Draw({
+    source: currentEditingLayer.value.olLayer.getSource(),
+    type: geometryType,
+  })
+
+  // 监听绘制完成事件
+  draw.on('drawend', (event) => {
+    const feature = event.feature as Feature<Geometry>
+    // 移除实时更新GeoJSON逻辑
+  })
+
+  // 添加绘制交互到地图
+  olMap.value.addInteraction(draw)
+  currentDraw.value = draw
+}
+
+// 停止绘制
+const stopDrawing = () => {
+  if (olMap.value && currentDraw.value) {
+    olMap.value.removeInteraction(currentDraw.value)
+    currentDraw.value = null
+  }
 }
 
 // 添加图层

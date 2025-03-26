@@ -2,16 +2,28 @@
   <div class="layer-manager">
     <div class="layer-header">
       <h3>图层管理</h3>
-      <el-upload
-        class="upload-btn"
-        action=""
-        :auto-upload="false"
-        :show-file-list="false"
-        accept=".geojson,.json"
-        :on-change="handleFileChange"
-      >
-        <el-button type="primary" :icon="Plus">导入GeoJSON</el-button>
-      </el-upload>
+      <el-dropdown>
+        <el-button type="primary" :icon="Plus">图层操作</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="createEmptyLayer"
+              ><el-icon><Edit /></el-icon>新建图层</el-dropdown-item
+            >
+            <el-upload
+              class="upload-btn"
+              action=""
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".geojson,.json"
+              :on-change="handleFileChange"
+            >
+              <el-dropdown-item
+                ><el-icon><Upload /></el-icon>导入GeoJSON</el-dropdown-item
+              >
+            </el-upload>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
 
     <div class="layer-list">
@@ -20,6 +32,7 @@
         v-for="(layer, index) in layers"
         :key="index"
         class="layer-item"
+        :class="{ 'editing-layer': layer.isEditing }"
         @contextmenu.prevent="showContextMenu($event, layer, index)"
       >
         <div class="layer-item-content">
@@ -44,6 +57,9 @@
     <!-- 缓冲区分析弹窗 -->
     <buffer-analysis ref="bufferAnalysisRef" @buffer-complete="handleBufferComplete" />
 
+    <!-- 图层名称输入弹窗 -->
+    <layer-name-dialog ref="layerNameDialogRef" @confirm="handleLayerNameConfirm" />
+
     <!-- 统一的上下文菜单 -->
     <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle">
       <div class="context-menu-item" @click="handleContextMenuCommand('zoom')">
@@ -62,16 +78,34 @@
         <el-icon><Opportunity /></el-icon>
         <span>缓冲区分析</span>
       </div>
+      <div
+        v-if="activeLayer?.layer.isEditable"
+        class="context-menu-item"
+        @click="handleContextMenuCommand('edit')"
+      >
+        <el-icon><Edit /></el-icon>
+        <span>{{ activeLayer?.layer.isEditing ? '停止编辑' : '开始编辑' }}</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Plus, Download, Delete, MoreFilled, ZoomIn, Opportunity } from '@element-plus/icons-vue'
+import {
+  Plus,
+  Download,
+  Delete,
+  MoreFilled,
+  ZoomIn,
+  Opportunity,
+  Edit,
+} from '@element-plus/icons-vue'
 import BufferAnalysis from './BufferAnalysis.vue'
+import LayerNameDialog from './LayerNameDialog.vue'
 import { ElMessage } from 'element-plus'
 import { saveAs } from 'file-saver'
+import GeoJSON from 'ol/format/GeoJSON'
 
 // 定义图层类型
 export interface LayerInfo {
@@ -80,9 +114,12 @@ export interface LayerInfo {
   visible: boolean
   data: any
   olLayer: any
+  isEditable: boolean
+  isEditing: boolean
 }
 
 const layers = ref<LayerInfo[]>([])
+const currentEditingLayer = ref<LayerInfo | null>(null)
 
 // 定义事件
 const emit = defineEmits([
@@ -91,10 +128,12 @@ const emit = defineEmits([
   'toggle-layer',
   'zoom-to-layer',
   'buffer-complete',
+  'edit-layer',
 ])
 
 const currentLayer = ref<LayerInfo>()
 const bufferAnalysisRef = ref(null)
+const layerNameDialogRef = ref(null)
 
 // 处理文件上传
 const handleFileChange = (file: any) => {
@@ -111,8 +150,23 @@ const handleFileChange = (file: any) => {
   reader.readAsText(file.raw)
 }
 
+// 创建空白图层
+const createEmptyLayer = () => {
+  const defaultName = `新建图层_${layers.value.length + 1}`
+  layerNameDialogRef.value?.open(defaultName)
+}
+
+// 处理图层名称确认
+const handleLayerNameConfirm = (layerName: string) => {
+  const emptyGeoJson = {
+    type: 'FeatureCollection',
+    features: [],
+  }
+  addGeoJsonLayer(layerName, emptyGeoJson, true)
+}
+
 // 添加GeoJSON图层
-const addGeoJsonLayer = (name: string, geoJson: any) => {
+const addGeoJsonLayer = (name: string, geoJson: any, isEditable: boolean = false) => {
   // 生成唯一ID
   const layerId = 'layer_' + Date.now()
 
@@ -123,6 +177,8 @@ const addGeoJsonLayer = (name: string, geoJson: any) => {
     visible: true,
     data: geoJson,
     olLayer: null,
+    isEditable: isEditable,
+    isEditing: false,
   }
 
   // 添加到图层列表
@@ -141,7 +197,22 @@ const toggleLayerVisibility = (layer: LayerInfo) => {
 
 // 导出图层
 const exportLayer = (layer: LayerInfo) => {
-  const blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
+  if (layer.isEditing) {
+    ElMessage.warning('编辑中的图层无法导出')
+    return
+  }
+  let blob: Blob
+  if (layer.isEditable) {
+    const format = new GeoJSON()
+    const features = layer.olLayer.getSource().getFeatures()
+    const geoJson = format.writeFeatures(features, {
+      dataProjection: 'EPSG:4326',
+      featureProjection: 'EPSG:3857',
+    })
+    blob = new Blob([geoJson], { type: 'application/json' })
+  } else {
+    blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
+  }
   saveAs(blob, `${layer.name}.geojson`)
   ElMessage.success(`成功导出图层: ${layer.name}`)
 }
@@ -211,6 +282,16 @@ const handleContextMenuCommand = (command: string) => {
     } else if (command === 'buffer') {
       // 触发缓冲区分析弹窗
       bufferAnalysisRef.value?.open(activeLayer.value.layer)
+    } else if (command === 'edit' && activeLayer.value.layer.isEditable) {
+      // 切换图层编辑状态
+      activeLayer.value.layer.isEditing = !activeLayer.value.layer.isEditing
+      // 关闭其他图层的编辑状态
+      layers.value.forEach((l) => {
+        if (l.id !== activeLayer.value.layer.id) {
+          l.isEditing = false
+        }
+      })
+      emit('edit-layer', activeLayer.value.layer)
     }
 
     // 隐藏菜单
@@ -263,6 +344,10 @@ onUnmounted(() => {
   margin-bottom: 15px;
 }
 
+.layer-header .el-dropdown {
+  margin-left: auto;
+}
+
 .layer-header h3 {
   margin: 0;
 }
@@ -276,6 +361,18 @@ onUnmounted(() => {
 .layer-item {
   margin-bottom: 10px;
   width: 100%;
+  transition: background-color 0.3s;
+}
+
+.layer-item.editing-layer {
+  background-color: #f0f8ff;
+  border: 1px solid #409eff;
+}
+
+.layer-item.editing-layer .layer-info::before {
+  content: '✎';
+  margin-right: 8px;
+  color: #409eff;
 }
 
 .layer-item-content {
