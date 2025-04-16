@@ -2,8 +2,8 @@
   <el-dialog v-model="dialogVisible" title="缓冲区分析" width="30%">
     <el-form label-width="100px">
       <el-form-item label="缓冲半径">
-        <el-input-number v-model="bufferRadius" :min="0" :step="100" />
-        <span style="margin-left: 8px">米</span>
+        <el-input-number v-model="bufferRadius" :min="0" :step="1" />
+        <span style="margin-left: 8px">公里</span>
       </el-form-item>
       <el-form-item label="融合缓冲区">
         <el-checkbox v-model="mergeBuffers">合并重叠区域</el-checkbox>
@@ -23,7 +23,7 @@ import * as turf from '@turf/turf'
 import { ElMessage } from 'element-plus'
 
 const dialogVisible = ref(false)
-const bufferRadius = ref(1000)
+const bufferRadius = ref(10)
 const mergeBuffers = ref(true)
 
 const props = defineProps<{
@@ -55,7 +55,7 @@ const handleConfirm = async () => {
   try {
     if (!currentLayer.value) return
 
-    let resultGeometry = turf.buffer(currentLayer.value.data, bufferRadius.value / 1000, {
+    let resultGeometry = turf.buffer(currentLayer.value.data, bufferRadius.value, {
       units: 'kilometers',
     })
 
@@ -65,7 +65,7 @@ const handleConfirm = async () => {
 
     emit('buffer-complete', {
       data: resultGeometry,
-      name: `${currentLayer.value.name}_缓冲区_${bufferRadius.value}m${mergeBuffers.value ? '_融合' : ''}`,
+      name: `${currentLayer.value.name}_缓冲区_${bufferRadius.value}km${mergeBuffers.value ? '_融合' : ''}`,
     })
 
     ElMessage.success('缓冲区分析完成')
