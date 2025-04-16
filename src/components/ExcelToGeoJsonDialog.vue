@@ -17,6 +17,7 @@
         <el-form-item label="图层类型">
           <el-select v-model="form.layerType" placeholder="请选择图层类型">
             <el-option label="点图层" value="point" />
+            <el-option label="圆图层" value="circle" />
             <el-option label="扇形面图层" value="sector" />
           </el-select>
         </el-form-item>
@@ -28,6 +29,23 @@
           </el-form-item>
           <el-form-item label="纬度字段">
             <el-select v-model="form.latField" placeholder="请选择纬度字段">
+              <el-option v-for="f in fields" :key="f" :label="f" :value="f" />
+            </el-select>
+          </el-form-item>
+        </template>
+        <template v-if="form.layerType === 'circle'">
+          <el-form-item label="经度字段">
+            <el-select v-model="form.lonField" placeholder="请选择经度字段">
+              <el-option v-for="f in fields" :key="f" :label="f" :value="f" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="纬度字段">
+            <el-select v-model="form.latField" placeholder="请选择纬度字段">
+              <el-option v-for="f in fields" :key="f" :label="f" :value="f" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="半径字段">
+            <el-select v-model="form.radiusField" placeholder="请选择半径字段">
               <el-option v-for="f in fields" :key="f" :label="f" :value="f" />
             </el-select>
           </el-form-item>
@@ -100,6 +118,8 @@ const canImport = computed(() => {
       form.startAngleField &&
       form.endAngleField
     )
+  } else if (form.layerType === 'circle') {
+    return form.lonField && form.latField && form.radiusField
   }
   return false
 })
@@ -159,6 +179,24 @@ const handleImport = () => {
           properties: { ...row },
         }
       }),
+    }
+  } else if (form.layerType === 'circle') {
+    geojson = {
+      type: 'FeatureCollection',
+      features: excelData.value.map((row: any) => {
+        const center = [Number(row[form.lonField]), Number(row[form.latField])]
+        const radius = Number(row[form.radiusField])
+        const circle = turf.circle(center, radius, {
+          steps: 64,
+          units: 'kilometers',
+          properties: { ...row }
+        })
+        return {
+          type: 'Feature',
+          geometry: circle.geometry,
+          properties: { ...row },
+        }
+      })
     }
   }
   if (geojson) {
