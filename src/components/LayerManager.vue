@@ -60,8 +60,6 @@
     <!-- 缓冲区分析弹窗 -->
     <buffer-analysis ref="bufferAnalysisRef" @buffer-complete="handleBufferComplete" />
 
-    <!-- 图层名称输入弹窗 -->
-    <layer-name-dialog ref="layerNameDialogRef" @confirm="handleLayerNameConfirm" />
     <!-- Excel导入表图层弹窗 -->
     <excel-to-geo-json-dialog
       v-model:visible="excelDialogVisible"
@@ -110,7 +108,6 @@ import {
   Edit,
 } from '@element-plus/icons-vue'
 import BufferAnalysis from './BufferAnalysis.vue'
-import LayerNameDialog from './LayerNameDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import GeoJSON from 'ol/format/GeoJSON'
 import ExcelToGeoJsonDialog from './ExcelToGeoJsonDialog.vue'
@@ -149,7 +146,6 @@ const emit = defineEmits([
 
 const currentLayer = ref<LayerInfo>()
 const bufferAnalysisRef = ref(null)
-const layerNameDialogRef = ref(null)
 
 // 处理文件上传
 const handleFileChange = (file: any) => {
@@ -169,7 +165,20 @@ const handleFileChange = (file: any) => {
 // 创建空白图层
 const createEmptyLayer = () => {
   const defaultName = `新建图层_${layers.value.length + 1}`
-  layerNameDialogRef.value?.open(defaultName)
+  ElMessageBox.prompt('请输入图层名称', '新建图层', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputValue: defaultName,
+    inputPattern: /^[^\\/:*?"<>|]+$/,
+    inputErrorMessage: '名称不能包含特殊字符'
+  }).then(({ value }) => {
+    if (!value) return
+    const emptyGeoJson = {
+      type: 'FeatureCollection',
+      features: [],
+    }
+    addGeoJsonLayer(value, emptyGeoJson, true)
+  }).catch(() => {})
 }
 
 // 处理图层名称确认
