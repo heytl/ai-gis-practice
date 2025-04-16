@@ -111,8 +111,7 @@ import {
 } from '@element-plus/icons-vue'
 import BufferAnalysis from './BufferAnalysis.vue'
 import LayerNameDialog from './LayerNameDialog.vue'
-import { ElMessage } from 'element-plus'
-import { saveAs } from 'file-saver'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import GeoJSON from 'ol/format/GeoJSON'
 import ExcelToGeoJsonDialog from './ExcelToGeoJsonDialog.vue'
 
@@ -218,20 +217,41 @@ const exportLayer = (layer: LayerInfo) => {
     ElMessage.warning('编辑中的图层无法导出')
     return
   }
-  let blob: Blob
-  if (layer.isEditable) {
-    const format = new GeoJSON()
-    const features = layer.olLayer.getSource().getFeatures()
-    const geoJson = format.writeFeatures(features, {
-      dataProjection: 'EPSG:4326',
-      featureProjection: 'EPSG:3857',
-    })
-    blob = new Blob([geoJson], { type: 'application/json' })
-  } else {
-    blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
-  }
-  saveAs(blob, `${layer.name}.geojson`)
-  ElMessage.success(`成功导出图层: ${layer.name}`)
+  
+  // 使用弹窗让用户确认或修改导出文件名
+  ElMessageBox.prompt('请输入导出文件名', '导出图层', {
+    confirmButtonText: '导出',
+    cancelButtonText: '取消',
+    inputValue: layer.name,
+    inputPattern: /^[^\\/:*?"<>|]+$/,
+    inputErrorMessage: '文件名不能包含特殊字符'
+  }).then(({ value }) => {
+    if (!value) return
+    
+    let blob: Blob
+    if (layer.isEditable) {
+      const format = new GeoJSON()
+      const features = layer.olLayer.getSource().getFeatures()
+      const geoJson = format.writeFeatures(features, {
+        dataProjection: 'EPSG:4326',
+        featureProjection: 'EPSG:3857',
+      })
+      blob = new Blob([geoJson], { type: 'application/json' })
+    } else {
+      blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
+    }
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${value}.geojson`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    ElMessage.success(`成功导出图层: ${value}`)
+  }).catch(() => {
+    // 用户取消导出
+  })
 }
 
 // 删除图层
