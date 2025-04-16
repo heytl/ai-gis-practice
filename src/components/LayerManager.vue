@@ -21,6 +21,9 @@
                 ><el-icon><Upload /></el-icon>导入GeoJSON</el-dropdown-item
               >
             </el-upload>
+            <el-dropdown-item @click="openExcelDialog"
+              ><el-icon><Upload /></el-icon>导入表图层</el-dropdown-item
+            >
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -59,6 +62,11 @@
 
     <!-- 图层名称输入弹窗 -->
     <layer-name-dialog ref="layerNameDialogRef" @confirm="handleLayerNameConfirm" />
+    <!-- Excel导入表图层弹窗 -->
+    <excel-to-geo-json-dialog
+      v-model:visible="excelDialogVisible"
+      @import="handleExcelImport"
+    />
 
     <!-- 统一的上下文菜单 -->
     <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle">
@@ -106,6 +114,7 @@ import LayerNameDialog from './LayerNameDialog.vue'
 import { ElMessage } from 'element-plus'
 import { saveAs } from 'file-saver'
 import GeoJSON from 'ol/format/GeoJSON'
+import ExcelToGeoJsonDialog from './ExcelToGeoJsonDialog.vue'
 
 // 定义图层类型
 export interface LayerInfo {
@@ -120,6 +129,14 @@ export interface LayerInfo {
 
 const layers = ref<LayerInfo[]>([])
 const currentEditingLayer = ref<LayerInfo | null>(null)
+const excelDialogVisible = ref(false)
+const openExcelDialog = () => {
+  excelDialogVisible.value = true
+}
+const handleExcelImport = (geojson: any) => {
+  addGeoJsonLayer('表图层_' + (layers.value.length + 1), geojson, true)
+  ElMessage.success('表图层导入成功')
+}
 
 // 定义事件
 const emit = defineEmits([
