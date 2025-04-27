@@ -61,13 +61,16 @@
     <buffer-analysis ref="bufferAnalysisRef" @buffer-complete="handleBufferComplete" />
 
     <!-- Excel导入表图层弹窗 -->
-    <excel-to-geo-json-dialog
-      v-model:visible="excelDialogVisible"
-      @import="handleExcelImport"
-    />
+    <excel-to-geo-json-dialog v-model:visible="excelDialogVisible" @import="handleExcelImport" />
 
     <!-- 统一的上下文菜单 -->
-    <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle">
+    <div
+      ref="contextMenuRef"
+      v-if="contextMenuVisible"
+      class="context-menu"
+      :style="contextMenuStyle"
+      @click.stop
+    >
       <div class="context-menu-item" @click="handleContextMenuCommand('zoom')">
         <el-icon><ZoomIn /></el-icon>
         <span>缩放至图层</span>
@@ -97,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue' // 导入 nextTick
 import {
   Plus,
   Download,
@@ -170,15 +173,17 @@ const createEmptyLayer = () => {
     cancelButtonText: '取消',
     inputValue: defaultName,
     inputPattern: /^[^\\/:*?"<>|]+$/,
-    inputErrorMessage: '名称不能包含特殊字符'
-  }).then(({ value }) => {
-    if (!value) return
-    const emptyGeoJson = {
-      type: 'FeatureCollection',
-      features: [],
-    }
-    addGeoJsonLayer(value, emptyGeoJson, true)
-  }).catch(() => {})
+    inputErrorMessage: '名称不能包含特殊字符',
+  })
+    .then(({ value }) => {
+      if (!value) return
+      const emptyGeoJson = {
+        type: 'FeatureCollection',
+        features: [],
+      }
+      addGeoJsonLayer(value, emptyGeoJson, true)
+    })
+    .catch(() => {})
 }
 
 // 处理图层名称确认
@@ -226,41 +231,43 @@ const exportLayer = (layer: LayerInfo) => {
     ElMessage.warning('编辑中的图层无法导出')
     return
   }
-  
+
   // 使用弹窗让用户确认或修改导出文件名
   ElMessageBox.prompt('请输入导出文件名', '导出图层', {
     confirmButtonText: '导出',
     cancelButtonText: '取消',
     inputValue: layer.name,
     inputPattern: /^[^\\/:*?"<>|]+$/,
-    inputErrorMessage: '文件名不能包含特殊字符'
-  }).then(({ value }) => {
-    if (!value) return
-    
-    let blob: Blob
-    if (layer.isEditable) {
-      const format = new GeoJSON()
-      const features = layer.olLayer.getSource().getFeatures()
-      const geoJson = format.writeFeatures(features, {
-        dataProjection: 'EPSG:4326',
-        featureProjection: 'EPSG:3857',
-      })
-      blob = new Blob([geoJson], { type: 'application/json' })
-    } else {
-      blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
-    }
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${value}.geojson`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    ElMessage.success(`成功导出图层: ${value}`)
-  }).catch(() => {
-    // 用户取消导出
+    inputErrorMessage: '文件名不能包含特殊字符',
   })
+    .then(({ value }) => {
+      if (!value) return
+
+      let blob: Blob
+      if (layer.isEditable) {
+        const format = new GeoJSON()
+        const features = layer.olLayer.getSource().getFeatures()
+        const geoJson = format.writeFeatures(features, {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857',
+        })
+        blob = new Blob([geoJson], { type: 'application/json' })
+      } else {
+        blob = new Blob([JSON.stringify(layer.data)], { type: 'application/json' })
+      }
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${value}.geojson`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      ElMessage.success(`成功导出图层: ${value}`)
+    })
+    .catch(() => {
+      // 用户取消导出
+    })
 }
 
 // 删除图层
@@ -278,11 +285,13 @@ const contextMenuVisible = ref(false)
 const contextMenuStyle = ref({
   top: '0px',
   left: '0px',
+  visibility: 'visible',
 })
 const activeLayer = ref<{ layer: LayerInfo; index: number } | null>(null)
+const contextMenuRef = ref<HTMLElement | null>(null) // 添加 contextMenuRef
 
 // 显示上下文菜单（同时处理右键和按钮点击）
-const showContextMenu = (
+const showContextMenu = async (
   event: MouseEvent,
   layer: LayerInfo,
   index: number,
@@ -291,27 +300,67 @@ const showContextMenu = (
   // 阻止事件冒泡
   event.stopPropagation()
 
-  // 根据触发方式设置菜单位置
+  let initialTop = 0
+  let initialLeft = 0
+
+  // 根据触发方式设置初始菜单位置
   if (isButtonClick) {
     // 如果是按钮点击，菜单显示在按钮下方
-    const buttonRect = (event.target as HTMLElement).getBoundingClientRect()
-    contextMenuStyle.value = {
-      top: `${buttonRect.bottom}px`,
-      left: `${buttonRect.left}px`,
-    }
+    const buttonRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    initialTop = buttonRect.bottom
+    initialLeft = buttonRect.left
   } else {
     // 如果是右键点击，菜单显示在鼠标位置
-    contextMenuStyle.value = {
-      top: `${event.clientY}px`,
-      left: `${event.clientX}px`,
-    }
+    initialTop = event.clientY
+    initialLeft = event.clientX
+  }
+
+  // 先设置初始位置，但不显示
+  contextMenuStyle.value = {
+    top: `${initialTop}px`,
+    left: `${initialLeft}px`,
+    visibility: 'hidden', // 先隐藏，计算完位置再显示
   }
 
   // 保存当前操作的图层
   activeLayer.value = { layer, index }
 
-  // 显示菜单
+  // 显示菜单（此时还是隐藏的）
   contextMenuVisible.value = true
+
+  // 等待DOM更新完成，以便获取菜单尺寸
+  await nextTick()
+
+  if (contextMenuRef.value) {
+    const menuHeight = contextMenuRef.value.offsetHeight
+    const windowHeight = window.innerHeight
+
+    let finalTop = initialTop
+    let finalLeft = initialLeft
+
+    // 检查垂直方向是否溢出
+    if (initialTop + menuHeight > windowHeight) {
+      finalTop = initialTop - menuHeight
+      // 如果向上调整后顶部溢出（菜单比视口高），则定位到视口顶部
+      if (finalTop < 0) {
+        finalTop = 5 // 留一点边距
+      }
+    }
+
+    // 更新最终样式并显示菜单
+    contextMenuStyle.value = {
+      top: `${finalTop}px`,
+      left: `${finalLeft}px`,
+      visibility: 'visible',
+    }
+  } else {
+    // 如果获取不到ref，使用初始位置并显示
+    contextMenuStyle.value = {
+      top: `${initialTop}px`,
+      left: `${initialLeft}px`,
+      visibility: 'visible',
+    }
+  }
 }
 
 // 处理上下文菜单命令
@@ -333,7 +382,7 @@ const handleContextMenuCommand = (command: string) => {
       activeLayer.value.layer.isEditing = !activeLayer.value.layer.isEditing
       // 关闭其他图层的编辑状态
       layers.value.forEach((l) => {
-        if (l.id !== activeLayer.value.layer.id) {
+        if (l.id !== activeLayer.value?.layer?.id) {
           l.isEditing = false
         }
       })
